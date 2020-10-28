@@ -1,149 +1,148 @@
+# from PyQt5.QtCore import QDataStream, QIODevice
+# from PyQt5.QtWidgets import QApplication, QDialog
+# from PyQt5.QtNetwork import QTcpSocket, QAbstractSocket
+#
+# class Client(QDialog):
+#     def __init__(self):
+#         super().__init__()
+#         self.tcpSocket = QTcpSocket(self)
+#         self.blockSize = 0
+#         self.makeRequest()
+#         self.tcpSocket.waitForConnected(1000)
+#         # send any message you like it could come from a widget text.
+#         self.tcpSocket.write(b'hello')
+#         self.tcpSocket.readyRead.connect(self.dealCommunication)
+#         self.tcpSocket.error.connect(self.displayError)
+#
+#     def makeRequest(self):
+#         HOST = '127.0.0.1'
+#         PORT = 8000
+#         self.tcpSocket.connectToHost(HOST, PORT, QIODevice.ReadWrite)
+#
+#     def dealCommunication(self):
+#         instr = QDataStream(self.tcpSocket)
+#         instr.setVersion(QDataStream.Qt_5_0)
+#         if self.blockSize == 0:
+#             if self.tcpSocket.bytesAvailable() < 2:
+#                 return
+#             self.blockSize = instr.readUInt16()
+#         if self.tcpSocket.bytesAvailable() < self.blockSize:
+#             return
+#         # Print response to terminal, we could use it anywhere else we wanted.
+#         print(str(instr.readString(), encoding='ascii'))
+#
+#     def displayError(self, socketError):
+#         if socketError == QAbstractSocket.RemoteHostClosedError:
+#             pass
+#         else:
+#             print(self, "The following error occurred: %s." % self.tcpSocket.errorString())
+#
+#
+# if __name__ == '__main__':
+#     import sys
+#
+#     app = QApplication(sys.argv)
+#     client = Client()
+#     sys.exit(client.exec_())
+
 import sys
-from PyQt5.QtWidgets import *
-from PyQt5.QtGui import *
-import socket
 from PyQt5.QtCore import *
-import time
-import threading
+from PyQt5.QtGui import *
+from PyQt5.QtNetwork import *
+from PyQt5.QtWidgets import *
 
-FORMAT = 'utf-8'
-DISCONNECT_MSG = "!Disconnect"
-PORT = 5050  # IMP: Should be the same as that on the server side!
-SERVER = "192.168.178.26"  # local IPV4 address
-ADDR = (SERVER, PORT)
-client_conn_success = 44444  # default non zero return value for client connection status
+PORT = 9999
+SIZEOF_UINT32 = 4
 
-class SecondWindow(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle('Client ChatApp')
-        self.setFixedWidth(600)
-        self.setFixedHeight(800)
-        self.setStyleSheet("""
-            QLineEdit{
-                font-size: 30px
-            }
-            QPushButton{
-                font-size: 30px
-            }
-            """)
-        mainLayout = QVBoxLayout()
+class Form(QDialog):
 
-        self.usernameLabel = QLabel()
-        self.usernameLabel.setFont(QFont('Arial', 20))
-        mainLayout.addWidget(self.usernameLabel)
+    def __init__(self, parent=None):
+        super(Form, self).__init__()
 
-        self.chatArea = QPlainTextEdit()
-        self.chatArea.setFont(QFont('Arial', 18))
-        self.chatArea.setReadOnly(1)
-        mainLayout.addWidget(self.chatArea)
+        # Ititialize socket
+        self.socket = QTcpSocket()
 
-        self.typingSpace = QLineEdit()
-        mainLayout.addWidget(self.typingSpace)
+        # Initialize data IO variables
+        self.nextBlockSize = 0
+        self.request = None
 
-        self.sendButton = QPushButton('Send Message')
-        self.sendButton.clicked.connect(self.sendMessage)
-        mainLayout.addWidget(self.sendButton)
+        # Create widgets/layout
+        self.browser = QTextBrowser()
+        self.lineedit = QLineEdit("Enter text here, dummy")
+        self.lineedit.selectAll()
+        self.connectButton = QPushButton("Connect")
+        self.connectButton.setEnabled(True)
+        layout = QVBoxLayout()
+        layout.addWidget(self.browser, alignment=Qt.AlignJustify)
+        layout.addWidget(self.lineedit, alignment=Qt.AlignJustify)
+        layout.addWidget(self.connectButton, alignment=Qt.AlignBottom)
+        self.setLayout(layout)
+        self.lineedit.setFocus()
 
-        self.closeButton = QPushButton('Close')
-        self.closeButton.clicked.connect(self.destroy)
-        mainLayout.addWidget(self.closeButton)
+        # Signals and slots for line edit and connect button
+        self.lineedit.returnPressed.connect(self.issueRequest)
+        self.connectButton.clicked.connect(self.connectToServer)
 
-        self.setLayout(mainLayout)
-
-        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        self.timerForReceive = QTimer(self)
-        self.timerForReceive.setSingleShot(False)
-        self.timerForReceive.setInterval(3000)  # in milliseconds, so 3000 = 3 seconds
-        self.timerForReceive.timeout.connect(self.receive)
-
-        self.timerForSend = QTimer(self)
-        self.timerForSend.setSingleShot(False)
-        self.timerForSend.setInterval(3000)  # in milliseconds, so 3000 = 3 seconds
-        self.timerForSend.timeout.connect(self.sendMessage)
-
-        self.userNameFlag = True  # to send the username on the socket to server for first time
-
-    def displayInfo(self):
-        self.show()
-        try:
-            self.client.connect(ADDR)
-            self.client.setblocking(False)
-            self.client.settimeout(12.0)
-        except socket.error as err:
-            print(f"Client not connected due to: {err}")
-            self.close()
-
-        self.timerForReceive.start()
-        self.timerForSend.start()
-
-    def sendMessage(self):
-        try:
-            if self.userNameFlag:
-                message = f"{self.usernameLabel.text().split(': ')[1]}"
-                self.client.send(message.encode(FORMAT))
-                self.userNameFlag = False
-            else:
-                message = f"{self.usernameLabel.text().split(': ')[1]}: {self.typingSpace.text()}"
-                self.client.send(message.encode(FORMAT))
-                self.typingSpace.clear()
-        except socket.error as e:
-            print(f"Data cannot be sent or received due to {e}")
-            self.client.close()
+        self.setWindowTitle("Client")
+        # Signals and slots for networking
+        self.socket.readyRead.connect(self.readFromServer)
+        self.socket.disconnected.connect(self.serverHasStopped)
+        self.socket.error.connect(self.serverHasError)
 
 
-    # listening to server and Sending messages
-    def receive(self):
-        try:
-            # receive messages from server
-            incoming_message = self.client.recv(1024).decode(FORMAT)
-            if incoming_message == "UserName ":
-                self.client.send(self.usernameLabel.text().split(': ')[1].encode(FORMAT))
-            else:
-                self.chatArea.appendPlainText(incoming_message)
-        except socket.error as e:
-            print(f"[FATAL ERROR] {e}: Closing client connection..")
-            self.client.close()
+    # Update GUI
+    def updateUi(self, text):
+        self.browser.append(text)
 
+    # Create connection to server
+    def connectToServer(self):
+        self.connectButton.setEnabled(False)
+        self.socket.connectToHost("192.168.178.26", PORT)
 
-class MainWindow(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle('Login')
-        self.setFixedWidth(800)
+    def issueRequest(self):
+        self.request = QByteArray()
+        stream = QDataStream(self.request, QIODevice.WriteOnly)
+        stream.setVersion(QDataStream.Qt_5_0)
+        stream.writeUInt32(0)
+        stream.writeQString(self.lineedit.text())
+        stream.device().seek(0)
+        stream.writeUInt32(self.request.size() - SIZEOF_UINT32)
+        self.socket.write(self.request)
+        self.nextBlockSize = 0
+        self.request = None
+        self.lineedit.setText("")
 
-        self.secondWindow = SecondWindow()
+    def readFromServer(self):
+        stream = QDataStream(self.socket)
+        stream.setVersion(QDataStream.Qt_5_0)
 
-        mainLayout = QVBoxLayout()
-        self.setStyleSheet("""
-            QLineEdit{height: 40px; font-size: 30px}
-            QLabel{font-size: 30px}
-        """)
+        while True:
+            if self.nextBlockSize == 0:
+                if self.socket.bytesAvailable() < SIZEOF_UINT32:
+                    break
+                self.nextBlockSize = stream.readUInt32()
+            if self.socket.bytesAvailable() < self.nextBlockSize:
+                break
+            textFromServer = stream.readQString()
+            self.updateUi(textFromServer)
+            self.nextBlockSize = 0
 
-        self.name = QLineEdit()
-        mainLayout.addWidget(QLabel('Name:'))
-        mainLayout.addWidget(self.name)
+    def serverHasStopped(self):
+        self.socket.close()
+        self.connectButton.setEnabled(True)
 
-        self.Confirm = QPushButton('Confirm')
-        self.Confirm.setStyleSheet('font-size: 30px')
-        self.Confirm.clicked.connect(self.passingInformation)
-        mainLayout.addWidget(self.Confirm)
+    def serverHasError(self):
+        self.updateUi("Error: {}".format(self.socket.errorString()))
+        self.socket.close()
+        self.connectButton.setEnabled(True)
 
-        self.setLayout(mainLayout)
-
-    def passingInformation(self):
-        self.secondWindow.usernameLabel.setText("Username: " + self.name.text())
-        self.secondWindow.displayInfo()
+    # when user clicks on x
+    def closeEvent(self, QCloseEvent):
+        self.socket.close()
         self.close()
 
 
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    demo = MainWindow()
-    demo.show()
-    demo.secondWindow.typingSpace.setFocus()
-    sys.exit(app.exec_())
-
-
-
+app = QApplication(sys.argv)
+form = Form()
+form.show()
+app.exec_()

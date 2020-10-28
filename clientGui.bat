@@ -1,3 +1,2 @@
 @echo off
-python clientGui.py
-pause
+python ClientGui.py
